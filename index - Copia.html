@@ -1,0 +1,161 @@
+/**
+ * SPESE CANTIERE - Versione Enterprise Pro
+ * Ottimizzata per stabilità, gestione errori e performance.
+ */
+
+const SPREADSHEET_ID = '1OUoL4-pz18ouQDg0lC2IfBMic2apNmQyIUtRWYOwjjQ';
+const FOLDER_ID = '1oWz9tuRepocWXZBPGTjJcEksUqLegvI4';
+const COLOR_PRIMARY = '#4b816a';
+const LOGO_BASE64 = '...'; // Mantieni il tuo base64 qui
+
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  try {
+    // Impedisce collisioni in caso di invii simultanei
+    lock.waitLock(10000); 
+    
+    if (!e.postData || !e.postData.contents) {
+      throw new Error("Nessun dato ricevuto nella richiesta POST");
+    }
+
+    const data = JSON.parse(e.postData.contents);
+    
+    // --- FASE 1: VALIDAZIONE E SANIFICAZIONE ---
+    const validatedData = validateAndCleanData(data);
+    
+    // --- FASE 2: CREAZIONE INFRASTRUTTURA DRIVE ---
+    const folderInfo = createExpenseFolder(validatedData);
+    const folder = folderInfo.folder;
+    
+    // --- FASE 3: SALVATAGGIO ASSET ---
+    let fotoUrl = 'Nessuna foto';
+    if (validatedData.foto && validatedData.foto.includes('base64')) {
+      fotoUrl = saveImageToDrive(validatedData.foto, folder);
+    }
+    
+    const pdfUrl = generatePdfReport(validatedData, fotoUrl, folder);
+    
+    // --- FASE 4: REGISTRAZIONE DATABASE ---
+    writeToSheet(validatedData, folderInfo.url, fotoUrl, pdfUrl);
+    
+    return createJsonResponse({ success: true, folderUrl: folderInfo.url });
+
+  } catch (error) {
+    console.error('CRITICAL ERROR:', error.toString());
+    return createJsonResponse({ success: false, error: error.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Pulisce i dati e gestisce i tipi (es. converte virgole in punti)
+ */
+function validateAndCleanData(raw) {
+  if (!raw.operaio || !raw.importo || !raw.cig) {
+    throw new Error("Campi obbligatori mancanti: operaio, importo o cig");
+  }
+
+  // Converte importo in numero, gestendo sia "10.50" che "10,50"
+  let cleanImporto = raw.importo;
+  if (typeof cleanImporto === 'string') {
+    cleanImporto = parseFloat(cleanImporto.replace(',', '.'));
+  }
+  
+  if (isNaN(cleanImporto)) throw new Error("Formato importo non valido");
+
+  return {
+    ...raw,
+    importo: cleanImporto,
+    timestamp: raw.timestamp || new Date().toISOString(),
+    cantiere: raw.cantiere || 'Non specificato',
+    categoria: raw.categoria || 'Altro'
+  };
+}
+
+function createExpenseFolder(data) {
+  const parentFolder = DriveApp.getFolderById(FOLDER_ID);
+  const dateStr = Utilities.formatDate(new Date(), 'GMT+1', 'yyyy-MM-dd_HH-mm');
+  const folderName = `${dateStr}_${data.operaio.replace(/\s+/g, '_')}_${data.cig}`;
+  
+  const folder = parentFolder.createFolder(folderName);
+  folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  
+  return { folder, url: folder.getUrl() };
+}
+
+function saveImageToDrive(base64Data, folder) {
+  try {
+    const parts = base64Data.split(',');
+    const contentType = parts[0].split(':')[1].split(';')[Part0 = 0];
+    const decoded = Utilities.base64Decode(parts[1]);
+    const blob = Utilities.newBlob(decoded, contentType, "scontrino.jpg");
+    
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    return file.getUrl();
+  } catch (e) {
+    console.error("Errore salvataggio immagine:", e);
+    return "Errore caricamento foto";
+  }
+}
+
+function generatePdfReport(data, fotoUrl, folder) {
+  const date = new Date(data.timestamp);
+  const dateFormatted = Utilities.formatDate(date, 'GMT+1', 'dd/MM/yyyy HH:mm');
+  
+  // Template HTML semplificato per massimizzare la compatibilità del motore PDF
+  const htmlTemplate = `
+    <html>
+      <body style="font-family: sans-serif; padding: 20px;">
+        <div style="border-bottom: 2px solid ${COLOR_PRIMARY}; padding-bottom: 10px;">
+          <h1 style="color: ${COLOR_PRIMARY};">RICEVUTA SPESA CANTIERE</h1>
+          <p>Data: ${dateFormatted}</p>
+        </div>
+        <table style="width: 100%; margin-top: 20px; border-collapse: collapse;">
+          <tr><td style="padding: 8px; border-bottom: 1px solid #eee;"><b>Operaio:</b></td><td>${data.operaio}</td></tr>
+          <tr><td style="padding: 8px; border-bottom: 1px solid #eee;"><b>Cantiere:</b></td><td>${data.cantiere}</td></tr>
+          <tr><td style="padding: 8px; border-bottom: 1px solid #eee;"><b>Categoria:</b></td><td>${data.categoria}</td></tr>
+          <tr><td style="padding: 8px; border-bottom: 1px solid #eee;"><b>CIG:</b></td><td>${data.cig}</td></tr>
+          <tr><td style="padding: 8px; font-size: 1.2em; color: ${COLOR_PRIMARY};"><b>TOTALE:</b></td><td style="font-size: 1.2em;"><b>€ ${data.importo.toFixed(2)}</b></td></tr>
+        </table>
+        <div style="margin-top: 30px; background: #f9f9f9; padding: 15px;">
+          <b>Note:</b><br>${data.note || 'Nessuna nota'}
+        </div>
+      </body>
+    </html>
+  `;
+
+  const blob = Utilities.newBlob(htmlTemplate, 'text/html', 'report.html');
+  const pdfFile = folder.createFile(blob.getAs('application/pdf').setName(`Riepilogo_${data.cig}.pdf`));
+  return pdfFile.getUrl();
+}
+
+function writeToSheet(data, folderUrl, fotoUrl, pdfUrl) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheetByName('Spese') || ss.insertSheet('Spese');
+  
+  const date = new Date(data.timestamp);
+  
+  sheet.appendRow([
+    Utilities.formatDate(date, 'GMT+1', 'dd/MM/yyyy'),
+    Utilities.formatDate(date, 'GMT+1', 'HH:mm:ss'),
+    data.operaio,
+    data.cantiere,
+    data.categoria,
+    data.targa || '',
+    data.altroSpecifica || '',
+    data.importo,
+    data.cig,
+    data.note || '',
+    fotoUrl,
+    pdfUrl,
+    folderUrl,
+    'Da verificare'
+  ]);
+}
+
+function createJsonResponse(output) {
+  return ContentService.createTextOutput(JSON.stringify(output))
+    .setMimeType(ContentService.MimeType.JSON);
+}
