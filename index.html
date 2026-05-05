@@ -8,7 +8,7 @@
     <meta name="theme-color" content="#4b816a">
     <title>Spese Cantiere - GIS Design</title>
     <link rel="manifest" href="manifest.json">
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Montserrat:wght@700&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-primary: #0f1a14;
@@ -81,6 +81,15 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
+        }
+
+        .header-brand {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--accent-light);
+            margin-bottom: 8px;
+            letter-spacing: 1px;
         }
 
         .header h1 {
@@ -621,11 +630,8 @@
 
     <div class="container">
         <header class="header">
-            <div class="header-logo">
-                <img src="data:image/jpeg;base64,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" alt="GIS Design">
-            </div>
+            <div class="header-brand">GIS Design</div>
             <h1>Spese Cantiere</h1>
-            <p>GIS Design S.r.l.</p>
         </header>
 
         <div class="config-notice" id="configNotice">
